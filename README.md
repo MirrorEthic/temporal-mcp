@@ -239,3 +239,7 @@ MIT. See [LICENSE](LICENSE).
 Built by [Garret Sutherland](https://github.com/GMaN1911) / MirrorEthic LLC,
 extracted from the temporal layer of a larger cognitive-mesh project where
 this primitive was load-bearing enough to deserve its own package.
+
+---
+
+<sub>mcp-name: io.github.MirrorEthic/temporal-mcp</sub>

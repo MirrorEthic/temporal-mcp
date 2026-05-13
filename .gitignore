@@ -13,6 +13,9 @@ venv/
 state.json
 state.json.tmp
 
+# Local-only publisher CLI binary
+.tools/
+
 # Workers
 workers/node_modules/
 workers/.wrangler/

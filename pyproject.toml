@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "temporal-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Temporal grounding for LLM agents: per-thread elapsed time, day rollover, and resume detection as an MCP server."
 readme = "README.md"
 license = { text = "MIT" }

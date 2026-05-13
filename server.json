@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.MirrorEthic/temporal-mcp",
+  "title": "temporal-mcp",
+  "description": "Wall-clock awareness for LLM agents. Two tools: elapsed-time-between-turns + day rollover detection.",
+  "version": "0.2.0",
+  "websiteUrl": "https://temporal-mcp.dev",
+  "repository": {
+    "url": "https://github.com/MirrorEthic/temporal-mcp",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://temporal-mcp.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer token. Pick any opaque string (UUID, passphrase, etc.) — we SHA-256 hash it for storage and never see the original. The token is your private key for your timeline. Example: 'Bearer 8c7d4b8a-...'",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "temporal-mcp",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
