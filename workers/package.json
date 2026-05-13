@@ -1,0 +1,24 @@
+{
+  "name": "@temporal-mcp/worker",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Cloudflare Worker hosting the temporal-mcp MCP server over streamable HTTP, backed by D1.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply temporal_mcp --local",
+    "migrate:remote": "wrangler d1 migrations apply temporal_mcp --remote",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "wrangler": "^3.80.0"
+  }
+}

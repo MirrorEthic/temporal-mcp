@@ -12,3 +12,10 @@ venv/
 *.lock
 state.json
 state.json.tmp
+
+# Workers
+workers/node_modules/
+workers/.wrangler/
+workers/.dev.vars
+workers/dist/
+workers/.miniflare/

@@ -1,0 +1,33 @@
+name = "temporal-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Observability — free tier on the Workers Logs UI.
+[observability]
+enabled = true
+
+# Per-user request rate limit: 60 requests / 60 seconds, keyed by the
+# SHA256 of the bearer token (so anonymous abuse from one IP can't take
+# down the endpoint and one tenant can't starve another).
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
+# Per-user temporal state. Two columns key the only row that matters:
+# (token_hash, thread_key).
+[[d1_databases]]
+binding = "DB"
+database_name = "temporal_mcp"
+database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
+migrations_dir = "migrations"
+
+# Default timezone for headers when the request doesn't pin one. UTC is
+# safe; users can override per-call.
+[vars]
+DEFAULT_TZ = "UTC"
+# Set this to "true" in prod to require Authorization: Bearer <token>.
+# Local dev defaults to allowing anonymous so wrangler dev "just works".
+REQUIRE_AUTH = "false"

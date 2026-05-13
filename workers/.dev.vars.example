@@ -1,0 +1,5 @@
+# Copy to .dev.vars for `wrangler dev`. Not committed.
+# .dev.vars overrides [vars] in wrangler.toml during local development.
+
+REQUIRE_AUTH=false
+DEFAULT_TZ=UTC

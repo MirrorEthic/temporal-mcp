@@ -46,7 +46,44 @@ do something interesting with `day_rollover` (greet differently, reload
 context, recompute "today's items") or with `delta_sec` (decay relevance,
 detect a resumed session, flag idle threads).
 
-## Install
+## Two ways to use it
+
+### 1. Hosted endpoint — claude.ai, ChatGPT, mobile
+
+If you use claude.ai web, ChatGPT, or anything else that wants a *remote*
+MCP server, point your connector at:
+
+```
+https://temporal-mcp.dev/mcp
+```
+
+Authentication is one header:
+
+```
+Authorization: Bearer <any opaque string you choose>
+```
+
+Pick a UUID, a passphrase, a sentence about your dog — anything. We
+SHA-256 it before storing anything, so we never see the token itself. It
+is your private key for your timeline. Lose it and your history resets;
+share it and someone else can advance your timeline.
+
+No signup. No email. No PII. The hosted endpoint is free, rate-limited to
+60 requests/minute per token. If you outgrow that, self-host (see below).
+
+#### Claude.ai web (Custom Connectors)
+
+Settings → Connectors → Add Custom Connector. URL `https://temporal-mcp.dev/mcp`,
+auth type Bearer Token, paste your chosen token.
+
+#### ChatGPT (Custom Connectors)
+
+Same idea — Settings → Connectors → Custom MCP. Same URL, same token.
+
+### 2. Local stdio — Claude Desktop, Cursor, Cline, Zed, Claude Code
+
+For desktop/IDE MCP clients, `pip install` the Python package and run it
+locally. No network round-trip, state lives on your disk, no auth needed.
 
 ```bash
 pip install temporal-mcp
@@ -54,21 +91,13 @@ pip install temporal-mcp
 
 Python 3.9+. Linux, macOS, Windows.
 
-## Run
-
-As a stdio MCP server:
+Run as stdio:
 
 ```bash
-temporal-mcp
+temporal-mcp        # or: python -m temporal_mcp
 ```
 
-Or:
-
-```bash
-python -m temporal_mcp
-```
-
-### Claude Desktop
+#### Claude Desktop
 
 ```json
 {
@@ -80,9 +109,31 @@ python -m temporal_mcp
 }
 ```
 
-### Cursor / Cline / anything else that speaks MCP stdio
+#### Cursor / Cline / anything else that speaks MCP stdio
 
 Same idea — point the client at the `temporal-mcp` command.
+
+## Self-host the remote endpoint (Cloudflare Workers)
+
+The hosted endpoint at `temporal-mcp.dev` runs on Cloudflare Workers backed
+by D1. If you want your own instance — for privacy, scale, or to ship it
+as part of a larger product — the entire deploy lives in
+[`workers/`](workers/):
+
+```bash
+cd workers
+npm install
+npx wrangler login
+npx wrangler d1 create temporal_mcp           # creates the database
+# Paste the printed database_id into wrangler.toml
+npx wrangler d1 migrations apply temporal_mcp --remote
+npx wrangler deploy
+```
+
+Free tier covers ~100k requests/day forever. Set
+`REQUIRE_AUTH=true` in `[vars]` to refuse anonymous traffic. The Worker
+is ~400 lines of TypeScript and has its own unit tests
+([`workers/test/`](workers/test/)).
 
 ## Tools
 
