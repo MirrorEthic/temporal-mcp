@@ -8,7 +8,7 @@
 //                       half of streamable HTTP; the protocol allows
 //                       request/response only servers)
 
-import { handleJsonRpc, ANON_TOKEN_PLACEHOLDER } from "./mcp.js";
+import { ANON_TOKEN_PLACEHOLDER, handleJsonRpc } from "./mcp.js";
 import { hashToken } from "./clock.js";
 
 interface Env {
@@ -131,14 +131,28 @@ async function checkRateLimit(
     );
 }
 
+// Methods that touch per-user state and must be authenticated. Everything
+// else (initialize, tools/list, ping, notifications/initialized) is
+// read-only metadata and is allowed unauthenticated so directories like
+// Glama can probe the server without a credential.
+const AUTH_GATED_METHODS = new Set(["tools/call"]);
+
+function requiresAuth(body: unknown): boolean {
+    const msgs = Array.isArray(body) ? body : [body];
+    for (const m of msgs) {
+        if (
+            m &&
+            typeof m === "object" &&
+            typeof (m as { method?: unknown }).method === "string" &&
+            AUTH_GATED_METHODS.has((m as { method: string }).method)
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 async function handleMcpPost(request: Request, env: Env): Promise<Response> {
-    const authResult = await extractTokenHash(request, env);
-    if ("error" in authResult) return authResult.error;
-    const { tokenHash } = authResult;
-
-    const rateLimited = await checkRateLimit(env, tokenHash);
-    if (rateLimited) return rateLimited;
-
     let body: unknown;
     try {
         body = await request.json();
@@ -152,6 +166,23 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
             400,
         );
     }
+
+    // Auth gate is conditional on what the request is trying to do.
+    // Introspection passes through; state-touching tool calls do not.
+    const needsAuth = requiresAuth(body);
+    let tokenHash: string;
+    if (needsAuth) {
+        const authResult = await extractTokenHash(request, env);
+        if ("error" in authResult) return authResult.error;
+        tokenHash = authResult.tokenHash;
+    } else {
+        // Unauthenticated metadata call. Use an ephemeral hash that
+        // won't collide with any real token and won't write any state.
+        tokenHash = await hashToken(ANON_TOKEN_PLACEHOLDER);
+    }
+
+    const rateLimited = await checkRateLimit(env, tokenHash);
+    if (rateLimited) return rateLimited;
 
     const sessionId = request.headers.get("Mcp-Session-Id");
     const ctx = { env, tokenHash, sessionId };
