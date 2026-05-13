@@ -1,15 +1,33 @@
 // Worker entry point.
 //
 // Routes:
-//   GET  /            → human landing page (HTML), links to the docs
-//   GET  /health      → JSON liveness probe
-//   POST /mcp         → MCP JSON-RPC over streamable HTTP
-//   GET  /mcp         → returns 405 (we do not implement the SSE-pull
-//                       half of streamable HTTP; the protocol allows
-//                       request/response only servers)
+//   GET  /                                       human landing page
+//   GET  /health                                 JSON liveness probe
+//   POST /mcp                                    MCP JSON-RPC over streamable HTTP
+//   GET  /mcp                                    405 — request/response only
+//   GET  /.well-known/oauth-authorization-server OAuth discovery (RFC 8414)
+//   GET  /authorize                              OAuth 2.1 Authorization Code start
+//   POST /token                                  OAuth token endpoint (code + refresh)
+//   GET  /connect                                HTML page to mint credentials
+//   POST /connect/generate                       JSON credential issuance
+//
+// Two auth paths into /mcp:
+//   1. OAuth access token (prefix "tmcp_at_") — minted via /token, used
+//      by claude.ai / ChatGPT / anything that does OAuth.
+//   2. Raw bearer string — for Cursor / Cline / Desktop / Claude Code
+//      where the user invents an opaque token and pastes it directly.
+// Either way we resolve to a stable state key and rate-limit by it.
 
 import { ANON_TOKEN_PLACEHOLDER, handleJsonRpc } from "./mcp.js";
 import { hashToken } from "./clock.js";
+import {
+    handleAuthorize,
+    handleConnectGenerate,
+    handleConnectPage,
+    handleOAuthDiscovery,
+    handleToken,
+} from "./oauth-endpoints.js";
+import { isOAuthAccessToken, resolveAccessToken } from "./oauth.js";
 
 interface Env {
     DB: D1Database;
@@ -18,8 +36,6 @@ interface Env {
     DEFAULT_TZ?: string;
 }
 
-// Cloudflare's Rate Limiting binding type — not exported by
-// @cloudflare/workers-types in older versions, so declare locally.
 interface RateLimit {
     limit(opts: { key: string }): Promise<{ success: boolean }>;
 }
@@ -37,6 +53,7 @@ const LANDING_HTML = `<!doctype html>
   h1{margin-bottom:.2rem}
   .sub{color:#666;margin-top:0}
   a{color:#0366d6}
+  .cta{display:inline-block;padding:.6rem 1.2rem;background:#0366d6;color:white;border-radius:.4rem;text-decoration:none;margin:1rem 0}
 </style>
 </head>
 <body>
@@ -46,13 +63,20 @@ const LANDING_HTML = `<!doctype html>
 server <code>temporal-mcp</code> — two tools that give an LLM agent a sense
 of wall-clock time between turns. Day rollover, gap deltas, fresh-thread
 detection. No tracking, no email, no signup.</p>
-<h2>Connect</h2>
-<p>Point any MCP-capable client at:</p>
+
+<h2>For claude.ai &amp; ChatGPT (OAuth)</h2>
+<p>Grab a Client ID + Client Secret, paste into Custom Connector, done.</p>
+<p><a class="cta" href="/connect">Get OAuth credentials →</a></p>
+
+<h2>For Cursor / Cline / Claude Desktop (raw bearer)</h2>
+<p>If your client lets you set custom headers, skip the OAuth step. Pick
+any opaque string as your token and use:</p>
 <pre>POST https://temporal-mcp.dev/mcp
 Authorization: Bearer &lt;any opaque string you choose&gt;</pre>
-<p>The bearer token is your private key. We hash it before storing
-anything and never see it again. Lose it and your timeline resets; share
-it and someone can advance your timeline.</p>
+<p>We hash whatever you send before storing anything, so we never see the
+plaintext. Lose it and your timeline resets; share it and someone can
+advance your timeline.</p>
+
 <h2>Source</h2>
 <p><a href="https://github.com/MirrorEthic/temporal-mcp">github.com/MirrorEthic/temporal-mcp</a>
 &middot; <a href="https://pypi.org/project/temporal-mcp/">pypi</a></p>
@@ -80,7 +104,19 @@ function isAuthRequired(env: Env): boolean {
     return (env.REQUIRE_AUTH ?? "false").toLowerCase() === "true";
 }
 
-async function extractTokenHash(
+// Resolve a request's bearer token to a stable state key.
+//
+// Three cases:
+//   1. OAuth access token (prefix tmcp_at_)  → look up client_id, use as key
+//   2. Any other bearer string                → SHA-256(raw token) as key
+//   3. No bearer header                       → 401 if REQUIRE_AUTH=true,
+//                                                else anon placeholder
+//
+// Returns a { tokenHash } usable as both the D1 namespace key and the
+// rate-limiter key. Distinct tokens map to distinct keys; OAuth tokens
+// from the same client always map to the same client_id-derived hash
+// (so re-issuance via refresh doesn't reset the user's timeline).
+async function resolveAuth(
     request: Request,
     env: Env,
 ): Promise<{ tokenHash: string } | { error: Response }> {
@@ -98,7 +134,7 @@ async function extractTokenHash(
                         error: {
                             code: -32001,
                             message:
-                                "Missing Authorization header. Send 'Authorization: Bearer <opaque-token>'. Any opaque string works; pick a UUID and keep it.",
+                                "Missing Authorization. For claude.ai/ChatGPT use OAuth (visit /connect for credentials). For other clients, send 'Authorization: Bearer <any-opaque-string>'.",
                         },
                     },
                     401,
@@ -107,6 +143,31 @@ async function extractTokenHash(
         }
         return { tokenHash: await hashToken(ANON_TOKEN_PLACEHOLDER) };
     }
+
+    if (isOAuthAccessToken(rawToken)) {
+        const resolved = await resolveAccessToken(env, rawToken);
+        if (!resolved) {
+            return {
+                error: jsonResponse(
+                    {
+                        jsonrpc: "2.0",
+                        id: null,
+                        error: {
+                            code: -32001,
+                            message:
+                                "OAuth token invalid or expired. Refresh it via /token, or generate a fresh pair at /connect.",
+                        },
+                    },
+                    401,
+                ),
+            };
+        }
+        // Hash the client_id so the storage key shape is uniform with
+        // the raw-bearer path. Same client_id → same key across token
+        // rotations.
+        return { tokenHash: await hashToken(`oauth:${resolved.clientId}`) };
+    }
+
     return { tokenHash: await hashToken(rawToken) };
 }
 
@@ -131,10 +192,6 @@ async function checkRateLimit(
     );
 }
 
-// Methods that touch per-user state and must be authenticated. Everything
-// else (initialize, tools/list, ping, notifications/initialized) is
-// read-only metadata and is allowed unauthenticated so directories like
-// Glama can probe the server without a credential.
 const AUTH_GATED_METHODS = new Set(["tools/call"]);
 
 function requiresAuth(body: unknown): boolean {
@@ -167,17 +224,13 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
         );
     }
 
-    // Auth gate is conditional on what the request is trying to do.
-    // Introspection passes through; state-touching tool calls do not.
     const needsAuth = requiresAuth(body);
     let tokenHash: string;
     if (needsAuth) {
-        const authResult = await extractTokenHash(request, env);
+        const authResult = await resolveAuth(request, env);
         if ("error" in authResult) return authResult.error;
         tokenHash = authResult.tokenHash;
     } else {
-        // Unauthenticated metadata call. Use an ephemeral hash that
-        // won't collide with any real token and won't write any state.
         tokenHash = await hashToken(ANON_TOKEN_PLACEHOLDER);
     }
 
@@ -187,8 +240,6 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
     const sessionId = request.headers.get("Mcp-Session-Id");
     const ctx = { env, tokenHash, sessionId };
 
-    // The streamable-HTTP spec allows the body to be a single request,
-    // a single notification, or a batch (array). Handle all three.
     if (Array.isArray(body)) {
         const responses = await Promise.all(
             body.map((msg) => handleJsonRpc(msg, ctx)),
@@ -205,8 +256,6 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
         ctx,
     );
     if (response === null) {
-        // Notification — no response body, but echo session id back so
-        // clients that opened a session at initialize can keep using it.
         return new Response(null, { status: 204, headers: corsHeaders() });
     }
     return jsonResponse(response);
@@ -215,6 +264,7 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         const url = new URL(request.url);
+        const origin = `${url.protocol}//${url.host}`;
 
         if (request.method === "OPTIONS") {
             return new Response(null, { status: 204, headers: corsHeaders() });
@@ -233,14 +283,31 @@ export default {
             return jsonResponse({ status: "ok", service: "temporal-mcp" });
         }
 
+        if (url.pathname === "/.well-known/oauth-authorization-server") {
+            return handleOAuthDiscovery(origin);
+        }
+
+        if (url.pathname === "/authorize" && request.method === "GET") {
+            return handleAuthorize(request, env);
+        }
+
+        if (url.pathname === "/token" && request.method === "POST") {
+            return handleToken(request, env);
+        }
+
+        if (url.pathname === "/connect" && request.method === "GET") {
+            return handleConnectPage();
+        }
+
+        if (url.pathname === "/connect/generate" && request.method === "POST") {
+            return handleConnectGenerate(env);
+        }
+
         if (url.pathname === "/mcp" && request.method === "POST") {
             return handleMcpPost(request, env);
         }
 
         if (url.pathname === "/mcp" && request.method === "GET") {
-            // Streamable HTTP allows a server-initiated SSE channel here,
-            // but temporal-mcp has nothing to push — every response is
-            // synchronous. 405 is the honest answer.
             return jsonResponse(
                 {
                     error:

@@ -79,28 +79,48 @@ MCP server, point your connector at:
 https://temporal-mcp.dev/mcp
 ```
 
-Authentication is one header:
+There are two ways to authenticate, depending on what your client UI exposes:
+
+#### A. OAuth 2.0 (claude.ai and ChatGPT custom connectors)
+
+Both claude.ai and ChatGPT's custom connector UIs require OAuth 2.0 with
+a Client ID and Client Secret. The hosted endpoint is a full OAuth
+provider — visit `https://temporal-mcp.dev/connect` and click
+**Generate OAuth Credentials**. You'll get a fresh `client_id` +
+`client_secret` pair, shown once. Paste them into your client's
+connector config. That's the entire signup.
+
+No email, no password, no account record — the credential pair *is* the
+identity. We store only a SHA-256 of the secret, so we never see the
+plaintext. Generate a new pair any time you want a fresh timeline.
+
+**Claude.ai setup:** Settings → Connectors → Add custom connector. URL
+`https://temporal-mcp.dev/mcp`. Paste your Client ID and Client Secret.
+Connect. The auto-approve flow redirects you back, claude.ai exchanges
+the code for a token, and you're done.
+
+**ChatGPT setup:** Same idea — Settings → Connectors → Custom MCP. Same
+URL, same credentials.
+
+#### B. Raw bearer token (Cursor, Cline, Claude Desktop, Zed, Claude Code)
+
+If your client supports custom HTTP headers (most do), skip OAuth and
+just send any opaque string as a bearer token:
 
 ```
 Authorization: Bearer <any opaque string you choose>
 ```
 
-Pick a UUID, a passphrase, a sentence about your dog — anything. We
-SHA-256 it before storing anything, so we never see the token itself. It
-is your private key for your timeline. Lose it and your history resets;
-share it and someone else can advance your timeline.
+Pick a UUID, a passphrase, anything. We SHA-256 it before storing
+anything; same identity-is-the-credential property as the OAuth flow,
+without the dance. This is the original lowest-ceremony path and works
+for any client that lets you set a custom header.
 
-No signup. No email. No PII. The hosted endpoint is free, rate-limited to
-60 requests/minute per token. If you outgrow that, self-host (see below).
+#### Either way
 
-#### Claude.ai web (Custom Connectors)
-
-Settings → Connectors → Add Custom Connector. URL `https://temporal-mcp.dev/mcp`,
-auth type Bearer Token, paste your chosen token.
-
-#### ChatGPT (Custom Connectors)
-
-Same idea — Settings → Connectors → Custom MCP. Same URL, same token.
+No signup. No email. No PII. The hosted endpoint is free, rate-limited
+to 60 requests/minute per credential. If you outgrow that, self-host
+(see below).
 
 ### 2. Local stdio — Claude Desktop, Cursor, Cline, Zed, Claude Code
 
