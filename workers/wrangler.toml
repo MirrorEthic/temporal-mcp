@@ -3,6 +3,16 @@ main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
+# Custom domains. The zone is in this Cloudflare account (registered
+# via Cloudflare Registrar) so the DNS record is provisioned by wrangler.
+[[routes]]
+pattern = "temporal-mcp.dev"
+custom_domain = true
+
+[[routes]]
+pattern = "www.temporal-mcp.dev"
+custom_domain = true
+
 # Observability — free tier on the Workers Logs UI.
 [observability]
 enabled = true
@@ -21,13 +31,15 @@ simple = { limit = 60, period = 60 }
 [[d1_databases]]
 binding = "DB"
 database_name = "temporal_mcp"
-database_id = "REPLACE_WITH_REAL_ID_AFTER_wrangler_d1_create"
+database_id = "8c53a898-4788-401d-9345-ce28d414f647"
 migrations_dir = "migrations"
 
 # Default timezone for headers when the request doesn't pin one. UTC is
 # safe; users can override per-call.
 [vars]
 DEFAULT_TZ = "UTC"
-# Set this to "true" in prod to require Authorization: Bearer <token>.
-# Local dev defaults to allowing anonymous so wrangler dev "just works".
-REQUIRE_AUTH = "false"
+# Production: require Authorization: Bearer <token>. Without auth all
+# anonymous callers would share one state bucket and pollute each
+# other's delta_sec. Local dev overrides this to "false" via .dev.vars
+# so wrangler dev works without ceremony.
+REQUIRE_AUTH = "true"
