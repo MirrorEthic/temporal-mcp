@@ -29,6 +29,28 @@ A persistent per-thread last-seen log, exposed as two MCP tools:
 
 That's it. Time exists. Your model should know that.
 
+## Try it in 10 seconds
+
+```bash
+curl -s -X POST https://temporal-mcp.dev/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(uuidgen)" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+        "name":"temporal_tick",
+        "arguments":{"thread_key":"try-it","tz_offset_minutes":-360,"tz_name":"MDT"}}}' \
+| python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["content"][0]["text"])'
+```
+
+You'll see something like:
+
+```
+[temporal] Wed May 13, 10:42 AM MDT | fresh thread (no prior history)
+{...JSON payload...}
+```
+
+Run it twice and the second response shows the gap. Run it tomorrow and
+you'll get `day rollover: yes`. That's the whole point.
+
 ## What you get
 
 Every tick returns a human-readable header and a JSON payload:
