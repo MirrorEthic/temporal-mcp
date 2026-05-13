@@ -116,6 +116,28 @@ anything; same identity-is-the-credential property as the OAuth flow,
 without the dance. This is the original lowest-ceremony path and works
 for any client that lets you set a custom header.
 
+#### C. URL-embedded token (xAI, Grok, anything URL-only)
+
+If your client's connector UI only exposes a URL field — no headers, no
+auth, no OAuth — embed your token directly in the path:
+
+```
+https://temporal-mcp.dev/mcp/<any opaque string you choose>
+```
+
+Or as a query parameter, if the path form gets stripped:
+
+```
+https://temporal-mcp.dev/mcp?token=<any opaque string you choose>
+```
+
+Same SHA-256 hashing, same identity model. URL-embedded tokens leak
+more easily than header tokens (proxy logs, referrers), so this path
+is a pragmatic fallback rather than the default — but the threat in
+our model is "someone advances your timeline," not data exposure.
+Rotate by picking a new random string any time you suspect the URL has
+been logged where it shouldn't be.
+
 #### Either way
 
 No signup. No email. No PII. The hosted endpoint is free, rate-limited

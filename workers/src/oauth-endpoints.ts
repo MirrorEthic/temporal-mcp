@@ -283,10 +283,28 @@ const CONNECT_HTML = `<!doctype html>
   </ol>
 </div>
 
+<hr style="margin:2.5rem 0;border:none;border-top:1px solid #eee">
+
+<h2>Other clients</h2>
+
+<p><strong>Cursor / Cline / Claude Desktop / Zed / Claude Code</strong> —
+skip the OAuth dance. Send any opaque string as a bearer token:</p>
+<pre style="background:#f4f4f4;padding:.7rem;border-radius:.4rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;overflow:auto">POST https://temporal-mcp.dev/mcp
+Authorization: Bearer &lt;any UUID or passphrase you pick&gt;</pre>
+
+<p><strong>xAI / Grok</strong> (or anything else where the connector UI
+only takes a URL with no header or token field) — embed your token in
+the URL itself:</p>
+<pre style="background:#f4f4f4;padding:.7rem;border-radius:.4rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;overflow:auto">https://temporal-mcp.dev/mcp/&lt;any-UUID-or-passphrase-you-pick&gt;</pre>
+<p style="font-size:.9rem;color:#666">URL-embedded tokens are less safe
+than headers — URLs show up in referrer headers and proxy logs. The
+threat in our model is "someone advances your timeline," not data
+exposure (we hold no PII), but rotate (generate a fresh URL with a new
+random string) if your token ever leaks.</p>
+
 <p style="margin-top:2rem;font-size:.9rem;color:#666">
 Source: <a href="https://github.com/MirrorEthic/temporal-mcp">github.com/MirrorEthic/temporal-mcp</a>
 &middot; PyPI: <a href="https://pypi.org/project/temporal-mcp/">temporal-mcp</a>
-&middot; For Cursor / Cline / Claude Desktop, you can skip this page — they accept any raw bearer token.
 </p>
 
 <script>

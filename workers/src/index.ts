@@ -4,18 +4,26 @@
 //   GET  /                                       human landing page
 //   GET  /health                                 JSON liveness probe
 //   POST /mcp                                    MCP JSON-RPC over streamable HTTP
-//   GET  /mcp                                    405 — request/response only
+//   POST /mcp/<token>                            URL-embedded auth (for xAI etc.
+//                                                clients that only expose a URL
+//                                                field, no headers)
+//   GET  /mcp[/...]                              405 — request/response only
 //   GET  /.well-known/oauth-authorization-server OAuth discovery (RFC 8414)
 //   GET  /authorize                              OAuth 2.1 Authorization Code start
 //   POST /token                                  OAuth token endpoint (code + refresh)
 //   GET  /connect                                HTML page to mint credentials
 //   POST /connect/generate                       JSON credential issuance
 //
-// Two auth paths into /mcp:
-//   1. OAuth access token (prefix "tmcp_at_") — minted via /token, used
-//      by claude.ai / ChatGPT / anything that does OAuth.
-//   2. Raw bearer string — for Cursor / Cline / Desktop / Claude Code
-//      where the user invents an opaque token and pastes it directly.
+// Three auth paths into /mcp:
+//   1. OAuth access token (prefix "tmcp_at_") in Authorization header —
+//      minted via /token, used by claude.ai / ChatGPT.
+//   2. Raw bearer string in Authorization header — for Cursor / Cline /
+//      Desktop where the user invents an opaque token and pastes it
+//      into a header field.
+//   3. Token embedded in URL path (/mcp/<token>) or query string
+//      (?token=...) — for clients like xAI that only expose a URL
+//      field and no header/token field. Same SHA-256 hashing; user
+//      picks any opaque string.
 // Either way we resolve to a stable state key and rate-limit by it.
 
 import { ANON_TOKEN_PLACEHOLDER, handleJsonRpc } from "./mcp.js";
@@ -119,10 +127,18 @@ function isAuthRequired(env: Env): boolean {
 async function resolveAuth(
     request: Request,
     env: Env,
+    urlToken: string | null,
 ): Promise<{ tokenHash: string } | { error: Response }> {
-    const authHeader = request.headers.get("Authorization") ?? "";
-    const m = /^Bearer\s+(.+)$/i.exec(authHeader);
-    const rawToken = m ? m[1].trim() : "";
+    // Token can come from three places, in priority order:
+    //   1. URL path or query string (URL-only clients like xAI)
+    //   2. Authorization: Bearer header (everyone else)
+    // We accept whichever shows up first.
+    let rawToken = (urlToken ?? "").trim();
+    if (!rawToken) {
+        const authHeader = request.headers.get("Authorization") ?? "";
+        const m = /^Bearer\s+(.+)$/i.exec(authHeader);
+        rawToken = m ? m[1].trim() : "";
+    }
 
     if (!rawToken) {
         if (isAuthRequired(env)) {
@@ -134,7 +150,7 @@ async function resolveAuth(
                         error: {
                             code: -32001,
                             message:
-                                "Missing Authorization. For claude.ai/ChatGPT use OAuth (visit /connect for credentials). For other clients, send 'Authorization: Bearer <any-opaque-string>'.",
+                                "Missing credential. Three options: (a) claude.ai/ChatGPT — OAuth via /connect; (b) Cursor/Cline/Desktop — send 'Authorization: Bearer <any-string>'; (c) xAI or other URL-only clients — POST to https://temporal-mcp.dev/mcp/<any-string> instead.",
                         },
                     },
                     401,
@@ -209,7 +225,11 @@ function requiresAuth(body: unknown): boolean {
     return false;
 }
 
-async function handleMcpPost(request: Request, env: Env): Promise<Response> {
+async function handleMcpPost(
+    request: Request,
+    env: Env,
+    urlToken: string | null,
+): Promise<Response> {
     let body: unknown;
     try {
         body = await request.json();
@@ -227,7 +247,7 @@ async function handleMcpPost(request: Request, env: Env): Promise<Response> {
     const needsAuth = requiresAuth(body);
     let tokenHash: string;
     if (needsAuth) {
-        const authResult = await resolveAuth(request, env);
+        const authResult = await resolveAuth(request, env, urlToken);
         if ("error" in authResult) return authResult.error;
         tokenHash = authResult.tokenHash;
     } else {
@@ -303,18 +323,25 @@ export default {
             return handleConnectGenerate(env);
         }
 
-        if (url.pathname === "/mcp" && request.method === "POST") {
-            return handleMcpPost(request, env);
-        }
-
-        if (url.pathname === "/mcp" && request.method === "GET") {
-            return jsonResponse(
-                {
-                    error:
-                        "GET /mcp not supported. This server is request/response only; POST JSON-RPC to /mcp.",
-                },
-                405,
-            );
+        // /mcp and /mcp/<token>. The path-segment token is for clients
+        // that don't expose a header or auth field (xAI is the canonical
+        // example). The query-string ?token=... is a secondary fallback
+        // for clients that strip path segments. The Authorization
+        // header takes priority over both when present.
+        const mcpMatch = /^\/mcp(?:\/([^/]+))?\/?$/.exec(url.pathname);
+        if (mcpMatch) {
+            if (request.method !== "POST") {
+                return jsonResponse(
+                    {
+                        error:
+                            "Only POST /mcp[/<token>] is supported. This server is request/response only.",
+                    },
+                    405,
+                );
+            }
+            const pathToken = mcpMatch[1] ? decodeURIComponent(mcpMatch[1]) : null;
+            const queryToken = url.searchParams.get("token");
+            return handleMcpPost(request, env, pathToken ?? queryToken);
         }
 
         return jsonResponse({ error: "Not found" }, 404);
